@@ -1,3 +1,6 @@
+// Import the dexie indexdb library
+importScripts('dexie.min.js');
+
 // localhost:57
 self.addEventListener('install', function(event) {
     self.skipWaiting();
@@ -9,40 +12,76 @@ self.addEventListener('activate', function(event) {
     }
 });
 
+// Create our database
+var db = new Dexie('MyDatabase');
+
+// Define a schema
+db.version(1)
+	.stores({
+		friends: 'url, timescalled'
+	});
+
+
+// Open the database
+db.open()
+	.catch(function(error){
+		alert('Uh oh : ' + error);
+	});
+
+
 // Check if the URL has been called more than 3 times already
 function checkIfCalled(url){
 
-  var urlInStorage;
-  caches.match(url)
-        .then(function (response) {
-                      urlInStorage = response;
-                  });
+  var collection = db.friends.where('url').equalsIgnoreCase(url);
 
-  console.log('value in storage is', urlInStorage);
+  var collectionCount = 0;
+  collection.count(function (count) {
+    collectionCount = count;
+  });
 
-  if (urlInStorage !== undefined) {
-    // If yes, what is the number of times it was called?
-    console.log('The number of times called: ' + urlInStorage.called);
-    var urlDetails = {id:url, called: urlInStorage.called + 1};
-    console.log('adding to array: ' + urlDetails);
-
-    caches.open('deancache')
-          .then(function(cache) {
-            cache.put(url, Response(urlDetails));
-          });
-
+  // we didnt find anything
+  if (collectionCount === 0){
+    // We didn't find anything so add it to the DB
+    console.log('we didnt find a record for', url);
+    db.friends
+    .add({
+      url: url,
+      timescalled: 1
+    });
   }
-  else {
-    // The default setting
-    var defaultDetails = {id:url, called:1};
 
-    // Add the url into the array for the next call
-    //calls.push(urlDetails);
-    caches.open('deancache')
-          .then(function(cache) {
-            cache.put(url, Response(defaultDetails));
-          });
-  }
+
+  collection.each(function(friend) {
+    console.log('we found a record for', url);
+    // Check if the value already exists and breaks the threshold
+    if(friend)
+    {
+      console.log('it has a value', friend.timescalled);
+
+      // It breaks the threshold
+      if (friend.timescalled > 5)
+      {
+          console.log('its broken the threshold', url);
+      }
+      else {
+        console.log('its been called more than once', url);
+
+        // Delete the row
+        db.friends.delete(friend.url);
+
+        // Add a new one back in
+        var updatedTimesCalled = friend.timescalled + 1;
+
+        console.log('im updating it to ', updatedTimesCalled);
+
+        db.friends
+        .add({
+          url: url,
+          timescalled: updatedTimesCalled
+        });
+      }
+    }
+  });
 }
 
 self.addEventListener('fetch', function(event) {
