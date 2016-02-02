@@ -1,3 +1,5 @@
+'use strict';
+
 // Import the dexie indexdb library
 importScripts('dexie.min.js');
 
@@ -13,79 +15,78 @@ self.addEventListener('activate', function(event) {
 });
 
 // Create our database
-var db = new Dexie('MyDatabase');
+var db = new Dexie('ThrottleDB');
 
 // Define a schema
 db.version(1)
 	.stores({
-		friends: 'url, timescalled'
+		friends: 'url, timescalled, timestamp'
 	});
 
 
 // Open the database
 db.open()
 	.catch(function(error){
-		alert('Uh oh : ' + error);
+		console.log('Database error', error);
 	});
 
 
-// Check if the URL has been called more than 3 times already
-function checkIfCalled(url){
+function exceedsThreshold(event){
+  let url = event.url;
+  let collection = db.friends.where('url').equalsIgnoreCase(url);
 
-  var collection = db.friends.where('url').equalsIgnoreCase(url);
-
-  var collectionCount = 0;
+  // Did we find the URL in the DB
+  let collectionCount = 0;
   collection.count(function (count) {
-    collectionCount = count;
+    // we didnt find anything
+    if (collectionCount === 0){
+      // We didn't find anything so add it to the DB for the first time
+      db.friends
+      .add({
+        url: url,
+        timescalled: 1,
+        timestamp: Date.now()
+      });
+    } else {
+      collectionCount = count;
+    }
   });
 
-  // we didnt find anything
-  if (collectionCount === 0){
-    // We didn't find anything so add it to the DB
-    console.log('we didnt find a record for', url);
-    db.friends
-    .add({
-      url: url,
-      timescalled: 1
-    });
-  }
-
-
+  // Loop through the results
   collection.each(function(friend) {
-    console.log('we found a record for', url);
-    // Check if the value already exists and breaks the threshold
     if(friend)
     {
-      console.log('it has a value', friend.timescalled);
+      let timeDifference = Date.now() - friend.timestamp;
 
-      // It breaks the threshold
-      if (friend.timescalled > 5)
+      // It breaks the threshold if it's called more than 10 times in the last 2 mins - This can be set to anything
+      if (friend.timescalled > 10 && timeDifference < 120000)
       {
-          console.log('its broken the threshold', url);
+          return new Response('', {
+                    status: 408,
+                    statusText: 'Request timed out.'
+                });
       }
       else {
-        console.log('its been called more than once', url);
-
         // Delete the row
         db.friends.delete(friend.url);
 
-        // Add a new one back in
-        var updatedTimesCalled = friend.timescalled + 1;
-
-        console.log('im updating it to ', updatedTimesCalled);
-
+        // Add it back in with the updated times called
         db.friends
         .add({
           url: url,
-          timescalled: updatedTimesCalled
+          timescalled: friend.timescalled + 1,
+          timestamp: Date.now()
         });
       }
     }
   });
+
+  // Return false because we havent exceeded the Threshold
+  return fetch(event.request);
 }
 
 self.addEventListener('fetch', function(event) {
-  checkIfCalled(event.request.url);
+    event.respondWith(exceedsThreshold(event.request));
 });
 
 
