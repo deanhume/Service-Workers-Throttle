@@ -31,8 +31,8 @@ db.open()
 	});
 
 
-function exceedsThreshold(event){
-  let url = event.url;
+function exceedsThreshold(request){
+  let url = request.url;
   let collection = db.friends.where('url').equalsIgnoreCase(url);
 
   // Did we find the URL in the DB
@@ -47,6 +47,8 @@ function exceedsThreshold(event){
         timescalled: 1,
         timestamp: Date.now()
       });
+      console.log('Success', url);
+      return url;
     } else {
       collectionCount = count;
     }
@@ -61,10 +63,8 @@ function exceedsThreshold(event){
       // It breaks the threshold if it's called more than 10 times in the last 2 mins - This can be set to anything
       if (friend.timescalled > 10 && timeDifference < 120000)
       {
-          return new Response('', {
-                    status: 408,
-                    statusText: 'Request timed out.'
-                });
+          console.log('Failure', url);
+          return 'undefined';
       }
       else {
         // Delete the row
@@ -77,18 +77,31 @@ function exceedsThreshold(event){
           timescalled: friend.timescalled + 1,
           timestamp: Date.now()
         });
+        console.log('Success', url);
+        return url;
       }
     }
   });
-
-  // Return false because we havent exceeded the Threshold
-  return fetch(event.request);
 }
 
 self.addEventListener('fetch', function(event) {
-    event.respondWith(exceedsThreshold(event.request));
-});
+    // dont bother with html pages
 
+    event.respondWith(fetch(exceedsThreshold(event.request)).then(response => {
+      if (!response.ok) { // See https://fetch.spec.whatwg.org/#ok-status
+        return new Response('', {
+              status: 408,
+              statusText: 'Request timed out.'
+          });
+      }
+      else{
+        console.log('Result', response);
+        return response;
+      }
+  }).catch(error => {
+    console.log('Error', error);
+  }));
+});
 
 // steps
 //
