@@ -1,9 +1,26 @@
 'use strict';
 
-// Import the dexie indexdb library
-importScripts('dexie.min.js');
+// A function to throttle any fetch events
+function debounce(inner, ms = 0) {
+  let timer = null;
+  let resolves = [];
 
-// localhost:57
+  return function (...args) {
+    // Run the function after a certain amount of time
+    clearTimeout(timer);
+    timer = setTimeout(() => {
+      // Get the result of the inner function, then apply it to the resolve function of
+      // each promise that has been created since the last time the inner function was run
+      let result = inner(...args);
+      resolves.forEach(r => r(result));
+      resolves = [];
+    }, ms);
+
+    return new Promise(r => resolves.push(r));
+  };
+}
+
+
 self.addEventListener('install', function(event) {
     self.skipWaiting();
 });
@@ -14,106 +31,7 @@ self.addEventListener('activate', function(event) {
     }
 });
 
-// Create our database
-var db = new Dexie('ThrottleDB');
-
-// Define a schema
-db.version(1)
-	.stores({
-		friends: 'url, timescalled, timestamp'
-	});
-
-
-// Open the database
-db.open()
-	.catch(function(error){
-		console.log('Database error', error);
-	});
-
-
-function exceedsThreshold(request){
-  let url = request.url;
-  let collection = db.friends.where('url').equalsIgnoreCase(url);
-
-  // Did we find the URL in the DB
-  let collectionCount = 0;
-  collection.count(function (count) {
-    // we didnt find anything
-    if (collectionCount === 0){
-      // We didn't find anything so add it to the DB for the first time
-      db.friends
-      .add({
-        url: url,
-        timescalled: 1,
-        timestamp: Date.now()
-      });
-      console.log('Success', url);
-      return url;
-    } else {
-      collectionCount = count;
-    }
-  });
-
-  // Loop through the results
-  collection.each(function(friend) {
-    if(friend)
-    {
-      let timeDifference = Date.now() - friend.timestamp;
-
-      // It breaks the threshold if it's called more than 10 times in the last 2 mins - This can be set to anything
-      if (friend.timescalled > 10 && timeDifference < 120000)
-      {
-          console.log('Failure', url);
-          return 'undefined';
-      }
-      else {
-        // Delete the row
-        db.friends.delete(friend.url);
-
-        // Add it back in with the updated times called
-        db.friends
-        .add({
-          url: url,
-          timescalled: friend.timescalled + 1,
-          timestamp: Date.now()
-        });
-        console.log('Success', url);
-        return url;
-      }
-    }
-  });
-}
-
 self.addEventListener('fetch', function(event) {
-    // dont bother with html pages
 
-    event.respondWith(fetch(exceedsThreshold(event.request)).then(response => {
-      if (!response.ok) { // See https://fetch.spec.whatwg.org/#ok-status
-        return new Response('', {
-              status: 408,
-              statusText: 'Request timed out.'
-          });
-      }
-      else{
-        console.log('Result', response);
-        return response;
-      }
-  }).catch(error => {
-    console.log('Error', error);
-  }));
+   event.respondWith(debounce(fetch(event.request), 2000));
 });
-
-// steps
-//
-// 1. create an array with each initial fetch request
-// 2. if there is more than 2(or 3?) requests for resources already in the array, add debounce or timeout
-//
-//
-// https://remysharp.com/2010/07/21/throttling-function-calls
-//
-//
-// good for:
-//
-// multiple scripts - bad perf
-// ddos attacks
-// searching typeahead throttling
